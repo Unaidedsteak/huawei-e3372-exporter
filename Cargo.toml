@@ -1,0 +1,28 @@
+[package]
+name = "huawei-e3372-exporter"
+version = "0.1.0"
+authors = ["Unaidedsteak <ryan@assis.co.uk>"]
+edition = "2018"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/Unaidedsteak/huawei-e3372-exporter"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4.11"
+env_logger = "0.8.2"
+clap = "2.33.3"
+tokio = { version = "0.2", features = ["full"] }
+hyper = { version = "0.13.9", optional = true }
+hyper-rustls = { version = "0.21.0", optional = true }
+http = { version = "0.2.1", optional = true }
+prometheus_exporter_base = { version = "1.1.0", features = ["hyper_server"] }
+reqwest = { version = "0.10", features = ["json"] }
+quick-xml = { version = "0.20", features = ["serialize"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.8"
+anyhow = "1.0.35"
+
+[features]
+hyper_server = ["hyper", "hyper-rustls", "http"]

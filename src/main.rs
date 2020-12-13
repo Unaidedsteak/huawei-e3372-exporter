@@ -1,86 +1,81 @@
-use clap::{crate_authors, crate_name, crate_version, Arg};
-use log::{info, trace};
+use anyhow::{Context, Error};
+use clap::{crate_name, crate_version, Arg};
+use huawei_api::generic_request;
+use log::debug;
 use prometheus_exporter_base::*;
-use std::env;
-use std::fs::read_dir;
+use std::collections::HashMap;
+use std::fs;
 
-#[derive(Debug, Clone, Default)]
-struct MyOptions {}
-
-fn calculate_file_size(path: &str) -> Result<u64, std::io::Error> {
-    let mut total_size: u64 = 0;
-    for entry in read_dir(path)? {
-        let p = entry?.path();
-        if p.is_file() {
-            total_size += p.metadata()?.len();
-        }
-    }
-
-    Ok(total_size)
-}
+mod config;
+use config::Config;
+mod huawei_api;
+mod metric;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Error> {
+    env_logger::init();
+    let config_path: String;
     let matches = clap::App::new(crate_name!())
         .version(crate_version!())
-        .author(crate_authors!("\n"))
         .arg(
-            Arg::with_name("port")
-                .short("p")
-                .help("exporter port")
-                .default_value("9898")
+            Arg::with_name("config")
+                .short("c")
+                .help("config file path")
                 .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("verbose")
-                .short("v")
-                .help("verbose logging")
-                .takes_value(false),
         )
         .get_matches();
 
-    if matches.is_present("verbose") {
-        env::set_var(
-            "RUST_LOG",
-            "trace"
-        );
+    if matches.is_present("config") {
+        config_path = matches.value_of("config").unwrap().to_string();
+        debug!(
+            "commandline flag for config file path specified, loading: {}",
+            config_path
+        )
     } else {
-        env::set_var(
-            "RUST_LOG", "info"
-        );
+        debug!("no commandline flag for config file path specified, using default path");
+        config_path = "./config.yml".to_string();
     }
-    env_logger::init();
 
-    let bind = matches.value_of("port").unwrap();
-    let bind = u16::from_str_radix(&bind, 10).expect("port must be a valid number");
-    let addr = ([0, 0, 0, 0], bind).into();
+    let config_file = fs::read_to_string(config_path).context("Config file not found")?;
+    let config: Config = serde_yaml::from_str(&config_file).context("Config file invalid")?;
 
-    info!("starting exporter on {}", addr);
+    let settings = config.settings;
+    let metrics = config.metrics;
+    let addr = (settings.listen_address, settings.listen_port).into();
+    let mut api_results: HashMap<String, String> = HashMap::new();
+    let mut api_session = huawei_api::Session::new(
+        settings.dongle_ip.to_string(),
+        settings.collection_timeout_seconds,
+    );
 
-    render_prometheus(addr, MyOptions::default(), |request, options| async move {
-        trace!(
-            "in our render_prometheus(request == {:?}, options == {:?})",
-            request,
-            options
-        );
+    render_prometheus(addr, {}, |_request, _options| async move {
+        api_session.refresh_session_token().await.unwrap();
+        let mut prom_result = String::new();
 
-        let mut pc = PrometheusMetric::build()
-            .with_name("folder_size")
-            .with_metric_type(MetricType::Counter)
-            .with_help("Size of the folder")
-            .build();
-
-        for folder in &vec!["/var/log", "/tmp"] {
-            pc.render_and_append_instance(
-                &PrometheusInstance::new()
-                    .with_label("folder", folder.as_ref())
-                    .with_value(calculate_file_size(folder).expect("cannot calculate folder size"))
-                    .with_current_timestamp()
-                    .expect("error getting the current UNIX epoch"),
-            );
+        // Populate our hashmap with all the unique API paths we're going to query
+        // Only those metrics deemed enabled require us to query the endpoint
+        // This should hopefully on unecessary or duplicate queries.
+        for metric in &metrics {
+            if metric.enabled {
+                if !api_results.contains_key(&metric.path) {
+                    let response = generic_request(&api_session, &metric.path).await.unwrap();
+                    api_results.insert(metric.path.clone(), response);
+                }
+            }
         }
 
-        Ok(pc.render())
+        // Iterate over all the enabled metrics and build a Prometheus metric
+        // based on the existing API response data.
+        for mut metric in metrics {
+            if metric.enabled {
+                let xml_response = api_results
+                    .get(&metric.path)
+                    .expect(format!("No results found for API path: {}", &metric.path).as_str());
+                prom_result.push_str(&metric.build(xml_response).await.unwrap());
+            }
+        }
+        Ok(prom_result)
     })
     .await;
+    Ok(())
 }

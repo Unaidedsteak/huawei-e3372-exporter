@@ -1,0 +1,41 @@
+settings:
+  listen_address: 0.0.0.0
+  listen_port: 9898
+  dongle_ip: 192.168.8.1
+  collection_timeout_seconds: 2
+
+metrics:
+  - name: current_connect_time
+    enabled: true
+    path: /monitoring/traffic-statistics
+    xml_tag: CurrentConnectTime
+    help_text: Duration the device has been connected to the mobile network
+    metric_type: counter
+
+  - name: current_download_total
+    enabled: true
+    path: /monitoring/traffic-statistics
+    xml_tag: CurrentDownload
+    help_text: Total bytes downloaded since being connected to the mobile network
+    metric_type: counter
+
+  - name: current_upload_total
+    enabled: true
+    path: /monitoring/traffic-statistics
+    xml_tag: CurrentUpload
+    help_text: Total bytes uploaded since being connected to the mobile network
+    metric_type: counter
+
+  - name: current_download_rate
+    enabled: true
+    path: /monitoring/traffic-statistics
+    xml_tag: CurrentDownloadRate
+    help_text: Current bits per second download rate
+    metric_type: gauge
+
+  - name: current_upload_rate
+    enabled: true
+    path: /monitoring/traffic-statistics
+    xml_tag: CurrentUploadRate
+    help_text: Current bits per second upload rate
+    metric_type: gauge
